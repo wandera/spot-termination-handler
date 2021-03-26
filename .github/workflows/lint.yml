@@ -1,0 +1,15 @@
+on: [push, pull_request]
+name: Lint
+jobs:
+  golangci:
+    name: Lint
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Lint
+      uses: wandera/golangci-lint-action@v2.3.0
+      env:
+        CGO_ENABLED: 0
+      with:
+        version: v1.32
