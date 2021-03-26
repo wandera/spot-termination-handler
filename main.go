@@ -5,11 +5,12 @@ import (
 	"flag"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/kubectl/pkg/drain"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,21 +20,22 @@ import (
 )
 
 const (
-	MetadataURI = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	MetadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	force               = true
+	gracePeriodSeconds  = 120
+	ignoreAllDaemonSets = true
+	deleteEmptyDirData  = true
 )
 
 func main(){
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
+	ctx := context.Background()
+
 	var devMode string
 	if devMode = os.Getenv("DEV_MODE"); devMode == "" {
 		devMode = "1"
-	}
-
-	drainParams := os.Getenv("DRAIN_PARAMETERS")
-	if drainParams == "" {
-		drainParams = "--grace-period=120 --force --ignore-daemonsets --delete-local-data"
 	}
 
 	logger := buildLogger(devMode)
@@ -48,8 +50,6 @@ func main(){
 		log.Panic("Environment variable NODE_NAME not set or empty. It's is a node that should be drained!")
 	}
 
-	log.Infof("Kubectl drain parameters: %s", drainParams)
-
 	config, err := getKubeConfig(log, devMode)
 	if err != nil {
 		log.Panic(err)
@@ -61,19 +61,31 @@ func main(){
 		log.Panic(err)
 	}
 
+	dh := drain.Helper{
+		Ctx:                             ctx,
+		Client:                          clientset,
+		Force:                           force,
+		GracePeriodSeconds:              gracePeriodSeconds,
+		IgnoreAllDaemonSets:             ignoreAllDaemonSets,
+		DeleteEmptyDirData:              deleteEmptyDirData,
+		Out:                             nil,
+		ErrOut:                          nil,
+		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
+			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
+		},
+	}
+
 	for {
 		if resp, err := http.Get(MetadataURI); err != nil {
 			log.Warnf("The HTTP request failed with error %s\n", err)
 		} else if resp.Status == "200" {
 			log.Info("Draining node - spot node is being terminated.")
-			pods, err := clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-				FieldSelector: "spec.nodeName=" + nodeName,
-			})
-			if err != nil {
+			if pods, err := dh.GetPodsForDeletion(nodeName); err != nil {
 				log.Errorf("Unable to list pods %s\n", err)
-			}
-			for _, pod := range pods.Items {
-				log.Infof("Pod %s", pod.Name)
+			} else {
+				if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil{
+					log.Errorf("Failed to evict pods %s", e)
+				}
 			}
 			break
 		}
