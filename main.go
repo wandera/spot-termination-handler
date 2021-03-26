@@ -3,6 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
@@ -11,12 +18,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/kubectl/pkg/drain"
-	"net/http"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
-	"time"
 )
 
 const (
@@ -27,7 +28,7 @@ const (
 	deleteEmptyDirData  = true
 )
 
-func main(){
+func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
@@ -59,14 +60,14 @@ func main(){
 	}
 
 	dh := drain.Helper{
-		Ctx:                             ctx,
-		Client:                          clientset,
-		Force:                           force,
-		GracePeriodSeconds:              gracePeriodSeconds,
-		IgnoreAllDaemonSets:             ignoreAllDaemonSets,
-		DeleteEmptyDirData:              deleteEmptyDirData,
-		Out:                             nil,
-		ErrOut:                          nil,
+		Ctx:                 ctx,
+		Client:              clientset,
+		Force:               force,
+		GracePeriodSeconds:  gracePeriodSeconds,
+		IgnoreAllDaemonSets: ignoreAllDaemonSets,
+		DeleteEmptyDirData:  deleteEmptyDirData,
+		Out:                 nil,
+		ErrOut:              nil,
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
@@ -80,7 +81,7 @@ func main(){
 			if pods, err := dh.GetPodsForDeletion(nodeName); err != nil {
 				log.Errorf("Unable to list pods %s\n", err)
 			} else {
-				if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil{
+				if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
 					log.Errorf("Failed to evict pods %s", e)
 				}
 			}
