@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -41,7 +43,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	log := zap.S().Named("main")
+	log := logger.Named("main").Sugar()
 
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -59,18 +61,29 @@ func main() {
 		log.Panic(err)
 	}
 
-	dh := drain.Helper{
+	dh := &drain.Helper{
 		Ctx:                 ctx,
 		Client:              clientset,
 		Force:               force,
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
 		DeleteEmptyDirData:  deleteEmptyDirData,
-		Out:                 nil,
-		ErrOut:              nil,
+		Out: drainWriter{
+			level: zapcore.InfoLevel,
+			log:   logger.Named("kubectl"),
+		},
+		ErrOut: drainWriter{
+			level: zapcore.ErrorLevel,
+			log:   logger.Named("kubectl"),
+		},
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
+	}
+
+	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	for {
@@ -78,17 +91,32 @@ func main() {
 			log.Warnf("The HTTP request failed with error %s\n", err)
 		} else if resp.Status == "200" {
 			log.Info("Draining node - spot node is being terminated.")
-			if pods, err := dh.GetPodsForDeletion(nodeName); err != nil {
-				log.Errorf("Unable to list pods %s\n", err)
+			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
+				log.Errorf("unable to cordon node %s", err)
 			} else {
-				if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
-					log.Errorf("Failed to evict pods %s", e)
+				log.Info("Draining node - spot node is being terminated.")
+				if pods, err := dh.GetPodsForDeletion(nodeName); err != nil {
+					log.Errorf("Unable to list pods %s\n", err)
+				} else {
+					if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
+						log.Errorf("Failed to evict pods %s", e)
+					}
 				}
 			}
 			break
 		}
 		time.Sleep(1 * time.Second)
 	}
+}
+
+type drainWriter struct {
+	level zapcore.Level
+	log   *zap.Logger
+}
+
+func (d drainWriter) Write(p []byte) (n int, err error) {
+	d.log.Check(d.level, strings.TrimSpace(string(p))).Write()
+	return
 }
 
 func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
@@ -143,6 +171,6 @@ func buildLogger(devMode bool) *zap.Logger {
 	if err != nil {
 		zap.S().Panicf("failed to build logger: %v", err)
 	}
-	zap.ReplaceGlobals(logger)
+
 	return logger
 }
