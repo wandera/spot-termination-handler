@@ -3,9 +3,6 @@ FROM golang:1.16 as builder
 
 WORKDIR /github.com/wandera/spot-termination-handler
 
-# this will cache the go mod download step, unless go.mod or go.sum changes
-ENV GO111MODULE=on
-
 # Copy the Go Modules manifests
 COPY go.mod go.sum ./
 
@@ -17,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Build
-RUN CGO_ENABLED=0 go build -v -a -o spot-termination-handler
+RUN CGO_ENABLED=0 go build -a -o spot-termination-handler
 
 FROM scratch
 COPY --from=builder /github.com/wandera/spot-termination-handler/spot-termination-handler /bin/spot-termination-handler

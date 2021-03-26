@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	MetadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 	force               = true
 	gracePeriodSeconds  = 120
 	ignoreAllDaemonSets = true
@@ -33,10 +33,7 @@ func main(){
 
 	ctx := context.Background()
 
-	var devMode string
-	if devMode = os.Getenv("DEV_MODE"); devMode == "" {
-		devMode = "1"
-	}
+	devMode := os.Getenv("DEV_MODE") == "1"
 
 	logger := buildLogger(devMode)
 	defer func() {
@@ -76,7 +73,7 @@ func main(){
 	}
 
 	for {
-		if resp, err := http.Get(MetadataURI); err != nil {
+		if resp, err := http.Get(metadataURI); err != nil {
 			log.Warnf("The HTTP request failed with error %s\n", err)
 		} else if resp.Status == "200" {
 			log.Info("Draining node - spot node is being terminated.")
@@ -93,10 +90,10 @@ func main(){
 	}
 }
 
-func getKubeConfig(log *zap.SugaredLogger, devMode string) (*rest.Config, error) {
+func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
-	if devMode == "1" {
+	if devMode {
 		log.Debug("DEV_MODE is set. Using kubconfig from homedir.")
 		var kubeconfig *string
 		if home := homedir.HomeDir(); home != "" {
@@ -124,14 +121,14 @@ func getKubeConfig(log *zap.SugaredLogger, devMode string) (*rest.Config, error)
 	return config, nil
 }
 
-func buildLogger(devMode string) *zap.Logger {
+func buildLogger(devMode bool) *zap.Logger {
 	var logLevel string
 	if logLevel = os.Getenv("LOG_LEVEL"); logLevel == "" {
 		logLevel = "DEBUG"
 	}
 
 	logCfg := zap.NewProductionConfig()
-	if devMode == "1" {
+	if devMode {
 		logCfg = zap.NewDevelopmentConfig()
 	}
 
