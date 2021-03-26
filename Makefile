@@ -10,10 +10,12 @@ ifeq (, $(shell which golangci-lint))
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.38.0
 endif
 
-
 check: prepare
 	@echo "Running check"
 	golangci-lint run
+
+test:
+	CGO_ENABLED=0 go test -v ./...
 
 build: spot-termination-handler
 
