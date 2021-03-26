@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build
-RUN CGO_ENABLED=0 GOOX=linux GOARCH=amd64 go build -a -o spot-termination-handler
+RUN CGO_ENABLED=0 go build -v -a -o spot-termination-handler
 
 FROM scratch
 COPY --from=builder /github.com/wandera/spot-termination-handler/spot-termination-handler /bin/spot-termination-handler
