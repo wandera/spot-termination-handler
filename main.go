@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,12 +25,54 @@ import (
 )
 
 const (
-	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
-	force               = true
-	gracePeriodSeconds  = 120
-	ignoreAllDaemonSets = true
-	deleteEmptyDirData  = true
+	metadataURI = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 )
+
+var (
+	force               bool
+	gracePeriodSeconds  int
+	ignoreAllDaemonSets bool
+	deleteEmptyDirData  bool
+	clientSet           *kubernetes.Clientset
+	reportingInstance   string
+	nodeName            string
+)
+
+func init() {
+	reportingInstance = os.Getenv("REPORTING_INSTANCE")
+	if reportingInstance == "" {
+		panic("environment variable REPORTING_INSTANCE for current not set or empty")
+	}
+
+	nodeName = os.Getenv("NODE_NAME")
+	if nodeName == "" {
+		panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv("FORCE")); err != nil {
+		force = true
+	} else {
+		force = value
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv("DELETE_EMPTY_DIR")); err != nil {
+		deleteEmptyDirData = true
+	} else {
+		deleteEmptyDirData = value
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv("IGNORE_DAEMONSETS")); err != nil {
+		ignoreAllDaemonSets = true
+	} else {
+		ignoreAllDaemonSets = value
+	}
+
+	if value, err := strconv.Atoi(os.Getenv("GRACE_PERIOD")); err != nil {
+		gracePeriodSeconds = 110
+	} else {
+		gracePeriodSeconds = value
+	}
+}
 
 func main() {
 	shutdown := make(chan os.Signal, 1)
@@ -45,30 +89,23 @@ func main() {
 
 	log := logger.Named("main").Sugar()
 
-	nodeName := os.Getenv("NODE_NAME")
-	if nodeName == "" {
-		log.Panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
-	}
-
-	reportingInstance := os.Getenv("REPORTING_INSTANCE")
-	if reportingInstance == "" {
-		log.Panic("environment variable REPORTING_INSTANCE for current not set or empty")
-	}
-
 	config, err := getKubeConfig(log, devMode)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	log.Info("starting spot-termination-handler")
-	clientset, err := kubernetes.NewForConfig(config)
+	log.Info(fmt.Sprintf(
+		"starting spot-termination-handler: DEV_MODE=%t FORCE=%t REPORTING_INSTANCE=%s IGNORE_DAEMONSETS=%t "+
+			"DELETE_EMPTY_DIR=%t GRACE_PERIOD=%d ", devMode, force, reportingInstance, ignoreAllDaemonSets,
+		deleteEmptyDirData, gracePeriodSeconds))
+	clientSet, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Panic(err)
 	}
 
 	dh := &drain.Helper{
 		Ctx:                 ctx,
-		Client:              clientset,
+		Client:              clientSet,
 		Force:               force,
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
@@ -82,11 +119,14 @@ func main() {
 			log:   logger.Named("drain"),
 		},
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
+			if er := generateSpotInterruptionEvent(ctx, pod); er != nil {
+				log.Errorf("failed to generate event for pod %s: %s", pod.Name, er)
+			}
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
 	}
 
-	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -109,9 +149,6 @@ func main() {
 				if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
 					log.Errorf("unable to list pods %s\n", err)
 				} else {
-					if e := generateSpotInterruptionEvents(ctx, reportingInstance, clientset, pods); e != nil {
-						log.Errorf("failed to generate events %s", e)
-					}
 					if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
 						log.Errorf("failed to evict pods %s", e)
 					}
@@ -119,7 +156,7 @@ func main() {
 			}
 			break
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }
 
