@@ -107,8 +107,6 @@ func main() {
 	}
 }
 
-
-
 func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
