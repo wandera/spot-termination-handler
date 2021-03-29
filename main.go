@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/termination-time"
+	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 	force               = true
 	gracePeriodSeconds  = 120
 	ignoreAllDaemonSets = true
@@ -119,7 +119,7 @@ func main() {
 			}
 			break
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 
