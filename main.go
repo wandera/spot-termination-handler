@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/termination-time"
 	force               = true
 	gracePeriodSeconds  = 120
 	ignoreAllDaemonSets = true
@@ -47,6 +48,11 @@ func main() {
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
 		log.Panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
+	}
+
+	reportingInstance := os.Getenv("REPORTING_INSTANCE")
+	if reportingInstance == "" {
+		log.Panic("environment variable REPORTING_INSTANCE for current not set or empty")
 	}
 
 	config, err := getKubeConfig(log, devMode)
@@ -86,9 +92,16 @@ func main() {
 	}
 
 	for {
-		if resp, err := http.Get(metadataURI); err != nil {
+		resp, err := http.Get(metadataURI)
+		if err != nil {
 			log.Warnf("the HTTP request failed with error %s\n", err)
-		} else if resp.Status == "200" {
+			continue
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.Status == "200" {
 			log.Info("draining node - spot node is being terminated")
 			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
 				log.Errorf("unable to cordon node %s", err)
@@ -96,6 +109,9 @@ func main() {
 				if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
 					log.Errorf("unable to list pods %s\n", err)
 				} else {
+					if e := generateSpotInterruptionEvents(ctx, reportingInstance, clientset, pods); e != nil {
+						log.Errorf("failed to generate events %s", e)
+					}
 					if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
 						log.Errorf("failed to evict pods %s", e)
 					}

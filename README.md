@@ -1,4 +1,4 @@
-# Welcome to ppot-termination-handler
+# Welcome to spot-termination-handler
 
 Spot-termination-handler app monitors EC2 spot instance for termination event. 
 
@@ -7,8 +7,10 @@ Spot-termination-handler app monitors EC2 spot instance for termination event.
 * Docker (optional)
 
 ## Prepare environment properties
-* configure kubectl drain parameters - default `'--grace-period=120 --force --ignore-daemonsets'`
-    * `DRAIN_PARAMETERS=`
+* configure NODE_NAME - name of the node that will be drained
+  * `NODE_NAME=kind-control-plane`
+* configure REPORTING_INSTANCE - id of the spot-termination-handler pod
+  * `REPORTING_INSTANCE=spot-termination-handler`
 
 ## Starting the application
 * build and start app `make run`
