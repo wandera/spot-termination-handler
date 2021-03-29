@@ -4,6 +4,7 @@ on: pull_request
 
 jobs:
   block-fixup:
+    name: Block fixup
     runs-on: ubuntu-18.04
     steps:
     - name: Block Autosquash Commits
