@@ -15,7 +15,7 @@ check: prepare
 	golangci-lint run
 
 test:
-	CGO_ENABLED=0 go test -v ./...
+	CGO_ENABLED=0 go test ./...
 
 build: spot-termination-handler
 
