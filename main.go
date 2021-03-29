@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -41,11 +42,11 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	log := zap.S().Named("main")
+	log := logger.Named("main").Sugar()
 
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		log.Panic("Environment variable NODE_NAME not set or empty. It's is a node that should be drained!")
+		log.Panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
 	}
 
 	config, err := getKubeConfig(log, devMode)
@@ -53,36 +54,51 @@ func main() {
 		log.Panic(err)
 	}
 
-	log.Info("Starting spot-termination-handler")
+	log.Info("starting spot-termination-handler")
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	dh := drain.Helper{
+	dh := &drain.Helper{
 		Ctx:                 ctx,
 		Client:              clientset,
 		Force:               force,
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
 		DeleteEmptyDirData:  deleteEmptyDirData,
-		Out:                 nil,
-		ErrOut:              nil,
+		Out: &drainWriter{
+			level: zapcore.InfoLevel,
+			log:   logger.Named("drain"),
+		},
+		ErrOut: &drainWriter{
+			level: zapcore.ErrorLevel,
+			log:   logger.Named("drain"),
+		},
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
 	}
 
+	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	for {
 		if resp, err := http.Get(metadataURI); err != nil {
-			log.Warnf("The HTTP request failed with error %s\n", err)
+			log.Warnf("the HTTP request failed with error %s\n", err)
 		} else if resp.Status == "200" {
-			log.Info("Draining node - spot node is being terminated.")
-			if pods, err := dh.GetPodsForDeletion(nodeName); err != nil {
-				log.Errorf("Unable to list pods %s\n", err)
+			log.Info("draining node - spot node is being terminated")
+			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
+				log.Errorf("unable to cordon node %s", err)
 			} else {
-				if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
-					log.Errorf("Failed to evict pods %s", e)
+				if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
+					log.Errorf("unable to list pods %s\n", err)
+				} else {
+					if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
+						log.Errorf("failed to evict pods %s", e)
+					}
 				}
 			}
 			break
@@ -95,7 +111,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
 	if devMode {
-		log.Debug("DEV_MODE is set. Using kubconfig from homedir.")
+		log.Debug("using kubconfig from homedir DEV_MODE is set")
 		var kubeconfig *string
 		if home := homedir.HomeDir(); home != "" {
 			kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
@@ -111,7 +127,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 			return nil, err
 		}
 	} else {
-		log.Debug("DEV_MODE is not set. Using incluster config.")
+		log.Debug("using incluster config DEV_MODE is not set")
 		var err error
 		config, err = rest.InClusterConfig()
 		if err != nil {
@@ -141,8 +157,8 @@ func buildLogger(devMode bool) *zap.Logger {
 	logCfg.Level.SetLevel(level)
 	logger, err := logCfg.Build()
 	if err != nil {
-		zap.S().Panicf("failed to build logger: %v", err)
+		panic(err)
 	}
-	zap.ReplaceGlobals(logger)
+
 	return logger
 }
