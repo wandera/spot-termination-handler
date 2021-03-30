@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -22,12 +26,54 @@ import (
 )
 
 const (
-	metadataURI         = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	metadataURI        = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	podNameEnv         = "POD_NAME"
+	nodeNameEnv        = "NODE_NAME"
+	forceEnv           = "FORCE"
+	deleteEmptyDirEnv  = "DELETE_EMPTY_DIR"
+	ignoreDaemonSetEnv = "IGNORE_DAEMONSETS"
+	gracePeriodEnv     = "GRACE_PERIOD"
+	devModeEnv         = "DEV_MODE"
+	logLevelEnv        = "LOG_LEVEL"
+)
+
+var (
 	force               = true
 	gracePeriodSeconds  = 120
 	ignoreAllDaemonSets = true
 	deleteEmptyDirData  = true
+	clientSet           *kubernetes.Clientset
+	reportingInstance   string
+	nodeName            string
 )
+
+func init() {
+	reportingInstance = os.Getenv(podNameEnv)
+	if reportingInstance == "" {
+		panic(fmt.Sprintf("environment variable %s for current not set or empty", podNameEnv))
+	}
+
+	nodeName = os.Getenv(nodeNameEnv)
+	if nodeName == "" {
+		panic(fmt.Sprintf("environment variable %s not set or empty. It's is a node that will be drained", nodeNameEnv))
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv(forceEnv)); err == nil {
+		force = value
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv(deleteEmptyDirEnv)); err == nil {
+		deleteEmptyDirData = value
+	}
+
+	if value, err := strconv.ParseBool(os.Getenv(ignoreDaemonSetEnv)); err == nil {
+		ignoreAllDaemonSets = value
+	}
+
+	if value, err := strconv.Atoi(os.Getenv(gracePeriodEnv)); err == nil {
+		gracePeriodSeconds = value
+	}
+}
 
 func main() {
 	shutdown := make(chan os.Signal, 1)
@@ -35,7 +81,7 @@ func main() {
 
 	ctx := context.Background()
 
-	devMode := os.Getenv("DEV_MODE") == "1"
+	devMode := os.Getenv(devModeEnv) == "1"
 
 	logger := buildLogger(devMode)
 	defer func() {
@@ -44,25 +90,23 @@ func main() {
 
 	log := logger.Named("main").Sugar()
 
-	nodeName := os.Getenv("NODE_NAME")
-	if nodeName == "" {
-		log.Panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
-	}
-
 	config, err := getKubeConfig(log, devMode)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	log.Info("starting spot-termination-handler")
-	clientset, err := kubernetes.NewForConfig(config)
+	log.Info(fmt.Sprintf(
+		"starting spot-termination-handler: %s=%t %s=%t %s=%s %s=%t %s=%t %s=%d", devModeEnv, devMode, forceEnv,
+		force, podNameEnv, reportingInstance, ignoreDaemonSetEnv, ignoreAllDaemonSets, deleteEmptyDirEnv,
+		deleteEmptyDirData, gracePeriodEnv, gracePeriodSeconds))
+	clientSet, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Panic(err)
 	}
 
 	dh := &drain.Helper{
 		Ctx:                 ctx,
-		Client:              clientset,
+		Client:              clientSet,
 		Force:               force,
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
@@ -76,19 +120,29 @@ func main() {
 			log:   logger.Named("drain"),
 		},
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
+			if er := generateSpotInterruptionEvent(ctx, pod); er != nil {
+				log.Errorf("failed to generate event for pod %s: %s", pod.Name, er)
+			}
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
 	}
 
-	node, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for {
-		if resp, err := http.Get(metadataURI); err != nil {
+		resp, err := http.Get(metadataURI)
+		if err != nil {
 			log.Warnf("the HTTP request failed with error %s\n", err)
-		} else if resp.Status == "200" {
+			continue
+		}
+
+		_, _ = io.Copy(ioutil.Discard, resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == 200 {
 			log.Info("draining node - spot node is being terminated")
 			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
 				log.Errorf("unable to cordon node %s", err)
@@ -103,7 +157,7 @@ func main() {
 			}
 			break
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -111,7 +165,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
 	if devMode {
-		log.Debug("using kubconfig from homedir DEV_MODE is set")
+		log.Debugf("using kubeconfig from homedir %s is set", devModeEnv)
 		var kubeconfig *string
 		if home := homedir.HomeDir(); home != "" {
 			kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
@@ -127,7 +181,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 			return nil, err
 		}
 	} else {
-		log.Debug("using incluster config DEV_MODE is not set")
+		log.Debugf("using incluster config %s is not set", devModeEnv)
 		var err error
 		config, err = rest.InClusterConfig()
 		if err != nil {
@@ -140,7 +194,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 
 func buildLogger(devMode bool) *zap.Logger {
 	var logLevel string
-	if logLevel = os.Getenv("LOG_LEVEL"); logLevel == "" {
+	if logLevel = os.Getenv(logLevelEnv); logLevel == "" {
 		logLevel = "DEBUG"
 	}
 
