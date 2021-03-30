@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -138,7 +139,7 @@ func main() {
 			continue
 		}
 
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(ioutil.Discard, resp.Body)
 		_ = resp.Body.Close()
 
 		if resp.StatusCode == 200 {
