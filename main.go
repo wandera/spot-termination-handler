@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"spot-termination-handler/pkg/logs"
 	"strconv"
 	"syscall"
 
@@ -127,22 +128,9 @@ func main() {
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
 		DeleteEmptyDirData:  deleteEmptyDirData,
-		AdditionalFilters: []drain.PodFilter{
-			func(pod v1.Pod) drain.PodDeleteStatus {
-				if pod.Name == podName {
-					return drain.MakePodDeleteStatusSkip()
-				}
-				return drain.MakePodDeleteStatusOkay()
-			},
-		},
-		Out: &drainWriter{
-			level: zapcore.InfoLevel,
-			log:   logger.Named("drain"),
-		},
-		ErrOut: &drainWriter{
-			level: zapcore.ErrorLevel,
-			log:   logger.Named("drain"),
-		},
+		AdditionalFilters:   []drain.PodFilter{filterPod(podName)},
+		Out:                 logs.NewZapWriter(zapcore.InfoLevel, logger.Named("drain")),
+		ErrOut:              logs.NewZapWriter(zapcore.ErrorLevel, logger.Named("drain")),
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
 			if er := generateSpotInterruptionEvent(ctx, pod); er != nil {
 				log.Errorf("failed to generate event for pod %s: %s", pod.Name, er)
@@ -168,6 +156,15 @@ func main() {
 	case <-shutdown:
 	}
 	log.Info("shutting down spot-termination-handler")
+}
+
+func filterPod(podName string) func(pod v1.Pod) drain.PodDeleteStatus {
+	return func(pod v1.Pod) drain.PodDeleteStatus {
+		if pod.Name == podName {
+			return drain.MakePodDeleteStatusSkip()
+		}
+		return drain.MakePodDeleteStatusOkay()
+	}
 }
 
 func getKubeConfig(log *zap.SugaredLogger) (*rest.Config, error) {
