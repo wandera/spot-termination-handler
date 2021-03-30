@@ -16,11 +16,11 @@ const (
 )
 
 func generateSpotInterruptionEvent(ctx context.Context, pod *v1.Pod) error {
-	_, e := clientSet.EventsV1().Events(pod.Namespace).Create(ctx, buildPodEvent(*pod), metav1.CreateOptions{})
+	_, e := clientSet.EventsV1().Events(pod.Namespace).Create(ctx, buildPodEvent(pod), metav1.CreateOptions{})
 	return e
 }
 
-func buildPodEvent(pod v1.Pod) *events.Event {
+func buildPodEvent(pod *v1.Pod) *events.Event {
 	return &events.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: pod.Name,

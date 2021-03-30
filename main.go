@@ -29,19 +29,19 @@ const (
 )
 
 var (
-	force               bool
-	gracePeriodSeconds  int
-	ignoreAllDaemonSets bool
-	deleteEmptyDirData  bool
+	force               = true
+	gracePeriodSeconds  = 120
+	ignoreAllDaemonSets = true
+	deleteEmptyDirData  = true
 	clientSet           *kubernetes.Clientset
 	reportingInstance   string
 	nodeName            string
 )
 
 func init() {
-	reportingInstance = os.Getenv("REPORTING_INSTANCE")
+	reportingInstance = os.Getenv("POD_NAME")
 	if reportingInstance == "" {
-		panic("environment variable REPORTING_INSTANCE for current not set or empty")
+		panic("environment variable POD_NAME for current not set or empty")
 	}
 
 	nodeName = os.Getenv("NODE_NAME")
@@ -49,27 +49,19 @@ func init() {
 		panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("FORCE")); err != nil {
-		force = true
-	} else {
+	if value, err := strconv.ParseBool(os.Getenv("FORCE")); err == nil {
 		force = value
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("DELETE_EMPTY_DIR")); err != nil {
-		deleteEmptyDirData = true
-	} else {
+	if value, err := strconv.ParseBool(os.Getenv("DELETE_EMPTY_DIR")); err == nil {
 		deleteEmptyDirData = value
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("IGNORE_DAEMONSETS")); err != nil {
-		ignoreAllDaemonSets = true
-	} else {
+	if value, err := strconv.ParseBool(os.Getenv("IGNORE_DAEMONSETS")); err == nil {
 		ignoreAllDaemonSets = value
 	}
 
-	if value, err := strconv.Atoi(os.Getenv("GRACE_PERIOD")); err != nil {
-		gracePeriodSeconds = 110
-	} else {
+	if value, err := strconv.Atoi(os.Getenv("GRACE_PERIOD")); err == nil {
 		gracePeriodSeconds = value
 	}
 }
@@ -95,7 +87,7 @@ func main() {
 	}
 
 	log.Info(fmt.Sprintf(
-		"starting spot-termination-handler: DEV_MODE=%t FORCE=%t REPORTING_INSTANCE=%s IGNORE_DAEMONSETS=%t "+
+		"starting spot-termination-handler: DEV_MODE=%t FORCE=%t POD_NAME=%s IGNORE_DAEMONSETS=%t "+
 			"DELETE_EMPTY_DIR=%t GRACE_PERIOD=%d ", devMode, force, reportingInstance, ignoreAllDaemonSets,
 		deleteEmptyDirData, gracePeriodSeconds))
 	clientSet, err = kubernetes.NewForConfig(config)
@@ -141,7 +133,7 @@ func main() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 
-		if resp.Status == "200" {
+		if resp.StatusCode == 200 {
 			log.Info("draining node - spot node is being terminated")
 			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
 				log.Errorf("unable to cordon node %s", err)
@@ -164,7 +156,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
 	if devMode {
-		log.Debug("using kubconfig from homedir DEV_MODE is set")
+		log.Debug("using kubeconfig from homedir DEV_MODE is set")
 		var kubeconfig *string
 		if home := homedir.HomeDir(); home != "" {
 			kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
