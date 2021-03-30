@@ -12,7 +12,10 @@ type drainWriter struct {
 	log   *zap.Logger
 }
 
-func (d *drainWriter) Write(p []byte) (n int, err error) {
-	d.log.Check(d.level, strings.TrimSpace(string(p))).Write()
-	return
+func (d *drainWriter) Write(p []byte) (int, error) {
+	if entry := d.log.Check(d.level, strings.TrimSpace(string(p))); entry != nil {
+		entry.Write()
+		return len(p), nil
+	}
+	return 0, nil
 }
