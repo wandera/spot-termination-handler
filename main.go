@@ -25,7 +25,15 @@ import (
 )
 
 const (
-	metadataURI = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	metadataURI        = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+	podNameEnv         = "POD_NAME"
+	nodeNameEnv        = "NODE_NAME"
+	forceEnv           = "FORCE"
+	deleteEmptyDirEnv  = "DELETE_EMPTY_DIR"
+	ignoreDaemonSetEnv = "IGNORE_DAEMONSETS"
+	gracePeriodEnv     = "GRACE_PERIOD"
+	devModeEnv         = "DEV_MODE"
+	logLevelEnv        = "LOG_LEVEL"
 )
 
 var (
@@ -39,29 +47,29 @@ var (
 )
 
 func init() {
-	reportingInstance = os.Getenv("POD_NAME")
+	reportingInstance = os.Getenv(podNameEnv)
 	if reportingInstance == "" {
-		panic("environment variable POD_NAME for current not set or empty")
+		panic(fmt.Sprintf("environment variable %s for current not set or empty", podNameEnv))
 	}
 
-	nodeName = os.Getenv("NODE_NAME")
+	nodeName = os.Getenv(nodeNameEnv)
 	if nodeName == "" {
-		panic("environment variable NODE_NAME not set or empty. It's is a node that will be drained")
+		panic(fmt.Sprintf("environment variable %s not set or empty. It's is a node that will be drained", nodeNameEnv))
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("FORCE")); err == nil {
+	if value, err := strconv.ParseBool(os.Getenv(forceEnv)); err == nil {
 		force = value
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("DELETE_EMPTY_DIR")); err == nil {
+	if value, err := strconv.ParseBool(os.Getenv(deleteEmptyDirEnv)); err == nil {
 		deleteEmptyDirData = value
 	}
 
-	if value, err := strconv.ParseBool(os.Getenv("IGNORE_DAEMONSETS")); err == nil {
+	if value, err := strconv.ParseBool(os.Getenv(ignoreDaemonSetEnv)); err == nil {
 		ignoreAllDaemonSets = value
 	}
 
-	if value, err := strconv.Atoi(os.Getenv("GRACE_PERIOD")); err == nil {
+	if value, err := strconv.Atoi(os.Getenv(gracePeriodEnv)); err == nil {
 		gracePeriodSeconds = value
 	}
 }
@@ -72,7 +80,7 @@ func main() {
 
 	ctx := context.Background()
 
-	devMode := os.Getenv("DEV_MODE") == "1"
+	devMode := os.Getenv(devModeEnv) == "1"
 
 	logger := buildLogger(devMode)
 	defer func() {
@@ -87,9 +95,9 @@ func main() {
 	}
 
 	log.Info(fmt.Sprintf(
-		"starting spot-termination-handler: DEV_MODE=%t FORCE=%t POD_NAME=%s IGNORE_DAEMONSETS=%t "+
-			"DELETE_EMPTY_DIR=%t GRACE_PERIOD=%d ", devMode, force, reportingInstance, ignoreAllDaemonSets,
-		deleteEmptyDirData, gracePeriodSeconds))
+		"starting spot-termination-handler: %s=%t %s=%t %s=%s %s=%t %s=%t %s=%d", devModeEnv, devMode, forceEnv,
+		force, podNameEnv, reportingInstance, ignoreDaemonSetEnv, ignoreAllDaemonSets, deleteEmptyDirEnv,
+		deleteEmptyDirData, gracePeriodEnv, gracePeriodSeconds))
 	clientSet, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Panic(err)
@@ -156,7 +164,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 	var config *rest.Config
 
 	if devMode {
-		log.Debug("using kubeconfig from homedir DEV_MODE is set")
+		log.Debugf("using kubeconfig from homedir %s is set", devModeEnv)
 		var kubeconfig *string
 		if home := homedir.HomeDir(); home != "" {
 			kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
@@ -172,7 +180,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 			return nil, err
 		}
 	} else {
-		log.Debug("using incluster config DEV_MODE is not set")
+		log.Debugf("using incluster config %s is not set", devModeEnv)
 		var err error
 		config, err = rest.InClusterConfig()
 		if err != nil {
@@ -185,7 +193,7 @@ func getKubeConfig(log *zap.SugaredLogger, devMode bool) (*rest.Config, error) {
 
 func buildLogger(devMode bool) *zap.Logger {
 	var logLevel string
-	if logLevel = os.Getenv("LOG_LEVEL"); logLevel == "" {
+	if logLevel = os.Getenv(logLevelEnv); logLevel == "" {
 		logLevel = "DEBUG"
 	}
 
