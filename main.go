@@ -3,15 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
-	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -38,6 +34,7 @@ const (
 
 var (
 	devMode             = false
+	logLevel            = "DEBUG"
 	force               = true
 	gracePeriodSeconds  = 120
 	ignoreAllDaemonSets = true
@@ -60,6 +57,10 @@ func init() {
 
 	if value, err := strconv.ParseBool(os.Getenv(devModeEnv)); err == nil {
 		devMode = value
+	}
+
+	if value := os.Getenv(logLevelEnv); value != "" {
+		logLevel = value
 	}
 
 	if value, err := strconv.ParseBool(os.Getenv(forceEnv)); err == nil {
@@ -100,6 +101,12 @@ func main() {
 	clientSet, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Panic(err)
+	}
+
+	// load the node early - cache or fail-fast if unavailable
+	node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	log.Info(fmt.Sprintf(
@@ -144,38 +151,23 @@ func main() {
 		},
 	}
 
-	node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for {
-		resp, err := http.Get(metadataURI)
-		if err != nil {
-			log.Warnf("the HTTP request failed with error %s\n", err)
-			continue
-		}
-
-		_, _ = io.Copy(ioutil.Discard, resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode == 200 {
-			log.Info("draining node - spot node is being terminated")
-			if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
-				log.Errorf("unable to cordon node %s", err)
+	select {
+	case <-waitForTerminationEvent():
+		log.Info("draining node - spot node is being terminated")
+		if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
+			log.Errorf("unable to cordon node %s", err)
+		} else {
+			if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
+				log.Errorf("unable to list pods %s\n", err)
 			} else {
-				if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
-					log.Errorf("unable to list pods %s\n", err)
-				} else {
-					if e := dh.DeleteOrEvictPods(pods.Pods()); e != nil {
-						log.Errorf("failed to evict pods %s", e)
-					}
+				if err := dh.DeleteOrEvictPods(pods.Pods()); err != nil {
+					log.Errorf("failed to evict pods %s", err)
 				}
 			}
-			break
 		}
-		time.Sleep(5 * time.Second)
+	case <-shutdown:
 	}
+	log.Info("shutting down spot-termination-handler")
 }
 
 func getKubeConfig(log *zap.SugaredLogger) (*rest.Config, error) {
@@ -189,11 +181,6 @@ func getKubeConfig(log *zap.SugaredLogger) (*rest.Config, error) {
 }
 
 func buildLogger() *zap.Logger {
-	var logLevel string
-	if logLevel = os.Getenv(logLevelEnv); logLevel == "" {
-		logLevel = "DEBUG"
-	}
-
 	logCfg := zap.NewProductionConfig()
 	if devMode {
 		logCfg = zap.NewDevelopmentConfig()
