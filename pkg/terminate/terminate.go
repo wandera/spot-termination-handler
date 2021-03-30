@@ -1,4 +1,4 @@
-package main
+package terminate
 
 import (
 	"io"
@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-func waitForTerminationEvent() chan interface{} {
+// Variable for testing purposes.
+var metadataURI = "http://169.254.169.254/latest/meta-data/spot/instance-action"
+
+func WaitCh() chan interface{} {
 	ret := make(chan interface{})
 	go func() {
 		for {

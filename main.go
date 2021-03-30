@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"spot-termination-handler/pkg/logs"
+	"spot-termination-handler/pkg/terminate"
 	"strconv"
 	"syscall"
 
@@ -22,7 +23,6 @@ import (
 )
 
 const (
-	metadataURI        = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 	podNameEnv         = "POD_NAME"
 	nodeNameEnv        = "NODE_NAME"
 	forceEnv           = "FORCE"
@@ -140,7 +140,7 @@ func main() {
 	}
 
 	select {
-	case <-waitForTerminationEvent():
+	case <-terminate.WaitCh():
 		log.Info("draining node - spot node is being terminated")
 		if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
 			log.Errorf("unable to cordon node %s", err)
