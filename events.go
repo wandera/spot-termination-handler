@@ -28,7 +28,7 @@ func buildPodEvent(pod *v1.Pod) *events.Event {
 		},
 		EventTime:           metav1.NowMicro(),
 		ReportingController: reportingController,
-		ReportingInstance:   reportingInstance,
+		ReportingInstance:   podName,
 		Action:              action,
 		Reason:              reason,
 		Regarding: v1.ObjectReference{
