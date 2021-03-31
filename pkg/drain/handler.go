@@ -30,6 +30,10 @@ type Handler struct {
 }
 
 func (h *Handler) Drain(node *v1.Node) {
+	if node == nil {
+		return
+	}
+
 	ctx := context.Background()
 	log := h.Logger.Named("drain").Sugar()
 	dh := &drain.Helper{

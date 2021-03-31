@@ -20,7 +20,7 @@ func TestWaitCh(t *testing.T) {
 				writer.WriteHeader(200)
 			},
 			shouldFinish: true,
-			timeout:      10 * time.Second,
+			timeout:      1 * time.Second,
 		},
 		{
 			name: "meta endpoint responded 500",
@@ -28,7 +28,7 @@ func TestWaitCh(t *testing.T) {
 				writer.WriteHeader(500)
 			},
 			shouldFinish: false,
-			timeout:      10 * time.Second,
+			timeout:      1 * time.Second,
 		},
 		{
 			name: "meta endpoint not responded",
@@ -36,7 +36,7 @@ func TestWaitCh(t *testing.T) {
 				time.Sleep(120 * time.Second)
 			},
 			shouldFinish: false,
-			timeout:      10 * time.Second,
+			timeout:      1 * time.Second,
 		},
 	}
 	for _, tt := range tests {
