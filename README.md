@@ -1,5 +1,8 @@
 # Welcome to spot-termination-handler
+[![Docker](https://github.com/wandera/spot-termination-handler/actions/workflows/docker.yml/badge.svg?branch=master)](https://github.com/wandera/spot-termination-handler/actions/workflows/docker.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/wanderadock/spot-termination-handler)](https://hub.docker.com/repository/docker/wanderadock/spot-termination-handler)
 
+## Description
 Spot-termination-handler app monitors EC2 spot instance for termination event.
 
 ## Docker image
