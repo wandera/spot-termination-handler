@@ -1,6 +1,15 @@
 # Welcome to spot-termination-handler
 
-Spot-termination-handler app monitors EC2 spot instance for termination event. 
+Spot-termination-handler app monitors EC2 spot instance for termination event.
+
+## Docker image
+```bash
+wanderadock/spot-termination-handler:latest
+```
+
+## Deployment
+The suggested deployment method is a DaemonSet running only on spot nodes.
+Check [examples](./examples) folder.
 
 ## Development environment prerequisites
 * [Go](https://golang.org/) >= 1.16
