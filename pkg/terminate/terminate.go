@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	errBackoff             = 1 * time.Second
+	invalidResponseBackoff = 5 * time.Second
+)
+
 // Variable for testing purposes.
 var metadataURI = "http://169.254.169.254/latest/meta-data/spot/instance-action"
 
@@ -16,7 +21,7 @@ func WaitCh() chan interface{} {
 		for {
 			resp, err := http.Get(metadataURI)
 			if err != nil {
-				time.Sleep(1 * time.Second)
+				time.Sleep(errBackoff)
 				continue
 			}
 			_, _ = io.Copy(ioutil.Discard, resp.Body)
@@ -26,7 +31,7 @@ func WaitCh() chan interface{} {
 				close(ret)
 				return
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(invalidResponseBackoff)
 		}
 	}()
 	return ret
