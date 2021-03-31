@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
-	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/drain"
@@ -44,8 +43,9 @@ func (h *Handler) Drain(node *v1.Node) {
 		Out:                 logs.NewZapWriter(zapcore.InfoLevel, h.Logger.Named("drain")),
 		ErrOut:              logs.NewZapWriter(zapcore.ErrorLevel, h.Logger.Named("drain")),
 		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
-			if er := h.generateSpotInterruptionEvent(ctx, pod); er != nil {
-				log.Errorf("failed to generate event for pod %s: %s", pod.Name, er)
+			_, err := h.Client.CoreV1().Events(pod.Namespace).Create(ctx, buildPodEvent(pod, h.PodName), metav1.CreateOptions{})
+			if err != nil {
+				log.Errorf("failed to generate event for pod %s: %s", pod.Name, err)
 			}
 			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
 		},
@@ -65,23 +65,13 @@ func (h *Handler) Drain(node *v1.Node) {
 	}
 }
 
-func (h *Handler) generateSpotInterruptionEvent(ctx context.Context, pod *v1.Pod) error {
-	_, err := h.Client.EventsV1().Events(pod.Namespace).Create(ctx, buildPodEvent(pod, h.PodName), metav1.CreateOptions{})
-	return err
-}
-
-func buildPodEvent(pod *v1.Pod, reportingInstance string) *eventsv1.Event {
-	return &eventsv1.Event{
+func buildPodEvent(pod *v1.Pod, reportingInstance string) *v1.Event {
+	return &v1.Event{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: pod.Name,
 			Namespace:    pod.Namespace,
 		},
-		EventTime:           metav1.NowMicro(),
-		ReportingController: reportingController,
-		ReportingInstance:   reportingInstance,
-		Action:              action,
-		Reason:              reason,
-		Regarding: v1.ObjectReference{
+		InvolvedObject: v1.ObjectReference{
 			Kind:            pod.Kind,
 			Namespace:       pod.Namespace,
 			Name:            pod.Name,
@@ -89,8 +79,17 @@ func buildPodEvent(pod *v1.Pod, reportingInstance string) *eventsv1.Event {
 			APIVersion:      pod.APIVersion,
 			ResourceVersion: pod.ResourceVersion,
 		},
-		Note: fmt.Sprintf("pod %s in namespace %s evicted due to spot node termination", pod.Name, pod.Namespace),
-		Type: v1.EventTypeNormal,
+		Reason:  reason,
+		Message: fmt.Sprintf("pod %s in namespace %s evicted due to spot node termination", pod.Name, pod.Namespace),
+		Source: v1.EventSource{
+			Component: reportingInstance,
+			Host:      pod.Spec.NodeName,
+		},
+		Type:                v1.EventTypeNormal,
+		EventTime:           metav1.NowMicro(),
+		Action:              action,
+		ReportingController: reportingController,
+		ReportingInstance:   reportingInstance,
 	}
 }
 
