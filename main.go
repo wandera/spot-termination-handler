@@ -6,20 +6,18 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"spot-termination-handler/pkg/logs"
+	"spot-termination-handler/pkg/drain"
 	"spot-termination-handler/pkg/terminate"
 	"strconv"
 	"syscall"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	"k8s.io/kubectl/pkg/drain"
 )
 
 const (
@@ -85,6 +83,9 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
+	sigusr := make(chan os.Signal, 1)
+	signal.Notify(sigusr, syscall.SIGUSR1)
+
 	ctx := context.Background()
 
 	logger := buildLogger()
@@ -121,50 +122,24 @@ func main() {
 		gracePeriodEnv, gracePeriodSeconds,
 	))
 
-	dh := &drain.Helper{
-		Ctx:                 ctx,
+	dh := drain.Handler{
 		Client:              clientSet,
+		Logger:              logger,
+		PodName:             podName,
 		Force:               force,
 		GracePeriodSeconds:  gracePeriodSeconds,
 		IgnoreAllDaemonSets: ignoreAllDaemonSets,
 		DeleteEmptyDirData:  deleteEmptyDirData,
-		AdditionalFilters:   []drain.PodFilter{filterPod(podName)},
-		Out:                 logs.NewZapWriter(zapcore.InfoLevel, logger.Named("drain")),
-		ErrOut:              logs.NewZapWriter(zapcore.ErrorLevel, logger.Named("drain")),
-		OnPodDeletedOrEvicted: func(pod *v1.Pod, usingEviction bool) {
-			if er := generateSpotInterruptionEvent(ctx, pod); er != nil {
-				log.Errorf("failed to generate event for pod %s: %s", pod.Name, er)
-			}
-			log.Infof("%s in namespace %s, evicted", pod.Name, pod.Namespace)
-		},
 	}
 
 	select {
+	case <-sigusr:
+		dh.Drain(node)
 	case <-terminate.WaitCh():
-		log.Info("draining node - spot node is being terminated")
-		if err := drain.RunCordonOrUncordon(dh, node, true); err != nil {
-			log.Errorf("unable to cordon node %s", err)
-		} else {
-			if pods, err := dh.GetPodsForDeletion(node.Name); err != nil {
-				log.Errorf("unable to list pods %s\n", err)
-			} else {
-				if err := dh.DeleteOrEvictPods(pods.Pods()); err != nil {
-					log.Errorf("failed to evict pods %s", err)
-				}
-			}
-		}
+		dh.Drain(node)
 	case <-shutdown:
 	}
 	log.Info("shutting down spot-termination-handler")
-}
-
-func filterPod(podName string) func(pod v1.Pod) drain.PodDeleteStatus {
-	return func(pod v1.Pod) drain.PodDeleteStatus {
-		if pod.Name == podName {
-			return drain.MakePodDeleteStatusSkip()
-		}
-		return drain.MakePodDeleteStatusOkay()
-	}
 }
 
 func getKubeConfig(log *zap.SugaredLogger) (*rest.Config, error) {
