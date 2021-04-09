@@ -10,6 +10,7 @@ import (
 	"spot-termination-handler/pkg/terminate"
 	"strconv"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -139,7 +140,10 @@ func main() {
 		dh.Drain(node)
 	case <-shutdown:
 	}
-	log.Info("shutting down spot-termination-handler")
+	log.Info("my work is done here. going to sleep")
+	if !devMode {
+		time.Sleep(2 * time.Minute)
+	}
 }
 
 func getKubeConfig(log *zap.SugaredLogger) (*rest.Config, error) {
