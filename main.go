@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -123,7 +124,7 @@ func main() {
 		gracePeriodEnv, gracePeriodSeconds,
 	))
 
-	dh := drain.Handler{
+	dh := &drain.Handler{
 		Client:              clientSet,
 		Logger:              logger,
 		PodName:             podName,
@@ -135,14 +136,18 @@ func main() {
 
 	select {
 	case <-sigusr:
-		dh.Drain(node)
+		drainNode(log, dh, node)
 	case <-terminate.WaitCh():
-		dh.Drain(node)
+		drainNode(log, dh, node)
 	case <-shutdown:
 	}
-	log.Info("my work is done here. going to sleep")
+}
+
+func drainNode(log *zap.SugaredLogger, dh *drain.Handler, node *v1.Node) {
+	dh.Drain(node)
+	log.Info("my work is done here. Going to sleep")
 	if !devMode {
-		time.Sleep(2 * time.Minute)
+		time.Sleep(3 * time.Minute)
 	}
 }
 
