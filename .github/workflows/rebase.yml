@@ -8,10 +8,10 @@ jobs:
   rebase:
     name: Rebase
     if: github.event.issue.pull_request != '' && (contains(github.event.comment.body, '/rebase') || contains(github.event.comment.body, '/autosquash') || contains(github.event.comment.body, '/rebase+'))
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout the latest code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         fetch-depth: 0
     - name: Rebase/Autosquash
