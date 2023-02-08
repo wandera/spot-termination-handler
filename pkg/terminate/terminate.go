@@ -2,7 +2,6 @@ package terminate
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"time"
 )
@@ -24,7 +23,7 @@ func WaitCh() chan interface{} {
 				time.Sleep(errBackoff)
 				continue
 			}
-			_, _ = io.Copy(ioutil.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 
 			if resp.StatusCode == 200 {
