@@ -22,7 +22,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Setup image metadata
         id: docker_meta
-        uses: wandera/ghaction-docker-meta@v1
+        uses: wandera/ghaction-docker-meta@v2
         with:
           images: |
             wanderadock/spot-termination-handler
