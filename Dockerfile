@@ -1,5 +1,5 @@
 # Build the doctor binary
-FROM golang:1.16 as builder
+FROM golang:1.21 as builder
 
 WORKDIR /github.com/wandera/spot-termination-handler
 
