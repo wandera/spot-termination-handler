@@ -8,13 +8,16 @@ jobs:
   rebase:
     name: Rebase
     if: github.event.issue.pull_request != '' && (contains(github.event.comment.body, '/rebase') || contains(github.event.comment.body, '/autosquash') || contains(github.event.comment.body, '/rebase+'))
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, jamf-ubuntu-latest]
+
     steps:
     - name: Checkout the latest code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        persist-credentials: false
+
     - name: Rebase/Autosquash
       uses: wandera/rebase@master
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.REBASE_TOKEN }}
